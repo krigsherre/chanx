@@ -1,60 +1,100 @@
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/krigsherre/chanx/master/assets/logo.svg" alt="chanx" width="100" />
+
 # chanx
 
-**Every Go channel operation, one function call. Generics. Zero dependencies.**
+**Every Go channel operation, one function call.**
 
-[![Go Version](https://img.shields.io/badge/go-1.21%2B-blue.svg)](https://golang.org/doc/devel/release.html)
+*Generics · Zero Dependencies · Fluent API*
+
+<br/>
+
+[![Go Version](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org/doc/devel/release.html)
+[![Go Reference](https://img.shields.io/badge/pkg.go.dev-reference-007D9C?style=for-the-badge&logo=go&logoColor=white)](https://pkg.go.dev/github.com/krigsherre/chanx)
+[![License: MIT](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge)](LICENSE)
 
 ```bash
 go get github.com/krigsherre/chanx
 ```
 
+</div>
+
+---
+
 ## Why chanx?
 
-Raw Go channel operations are incredibly powerful, but implementing common patterns often requires repetitive, multi-line boilerplate. `chanx` abstracts these patterns into simple, highly intuitive interfaces via domain sub-packages (`opt`, `stream`, `io`), maintaining type safety through generics.
+Raw Go channels are powerful — but every common pattern requires dozens of lines of goroutine plumbing. `chanx` wraps those patterns into a single, expressive function call, with full type safety via generics.
 
-### How it works
-
-```mermaid
-flowchart LR
-    A[stream.Of] -->|Stream| B[Filter]
-    B -->|Stream| C[Map]
-    C -->|Stream| D[Batch]
-    D -->|[]T| E[Drain]
-    
-    style A fill:#4CAF50,stroke:#fff,stroke-width:2px,color:#fff
-    style B fill:#2196F3,stroke:#fff,stroke-width:2px,color:#fff
-    style C fill:#2196F3,stroke:#fff,stroke-width:2px,color:#fff
-    style D fill:#9C27B0,stroke:#fff,stroke-width:2px,color:#fff
-    style E fill:#F44336,stroke:#fff,stroke-width:2px,color:#fff
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     chanx pipeline model                        │
+│                                                                 │
+│  stream.Of  ──▶  Filter  ──▶  Map  ──▶  Batch  ──▶  Drain      │
+│  [Source]       [Keep]     [Transform] [Group]    [Collect]     │
+│                                                                 │
+│  Every stage is a typed channel. No goroutine wiring needed.    │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Before & After
+---
 
-**Fluent Data Pipelines**
+## Before & After
+
+<table>
+<tr>
+<th>❌ Raw Go</th>
+<th>✅ chanx</th>
+</tr>
+<tr>
+<td>
+
 ```go
-// Before (raw Go)
-// (Requires dozens of lines of goroutines and channel management)
-
-// After (chanx Stream API)
-results := stream.Of(1, 2, 3, 4, 5, 6).
-    Filter(isEven).
-    Skip(1).
-    Take(2).
-    Drain() // Output: [4, 6]
-```
-
-**Context-Aware Send**
-```go
-// Before (raw Go)
+// Context-aware send
 select {
 case <-ctx.Done():
     return ctx.Err()
 case ch <- val:
 }
-
-// After (chanx Options API)
-_, err := io.Send(ch, val, opt.WithContext(ctx))
 ```
+
+</td>
+<td>
+
+```go
+// One line
+_, err := io.Send(ch, val,
+    opt.WithContext(ctx))
+```
+
+</td>
+</tr>
+<tr>
+<td>
+
+```go
+// Filtered pipeline
+// ~30 lines of goroutines,
+// channels, and WaitGroups...
+```
+
+</td>
+<td>
+
+```go
+// Fluent & readable
+results := stream.Of(1,2,3,4,5,6).
+    Filter(isEven).
+    Skip(1).
+    Take(2).
+    Drain() // → [4, 6]
+```
+
+</td>
+</tr>
+</table>
+
+---
 
 ## Quick Start
 
@@ -62,67 +102,92 @@ _, err := io.Send(ch, val, opt.WithContext(ctx))
 package main
 
 import (
-	"fmt"
-	
-	"github.com/krigsherre/chanx/opt"
-	"github.com/krigsherre/chanx/stream"
+    "fmt"
+
+    "github.com/krigsherre/chanx/stream"
 )
 
 func main() {
-	// Fluent Stream Processing
-	pipeline := stream.Of(1, 2, 3, 4, 5).
-		Filter(func(i int) bool { return i > 2 }).
-		Buffer(10)
+    // Build a typed pipeline — no goroutine wiring
+    pipeline := stream.Of(1, 2, 3, 4, 5).
+        Filter(func(i int) bool { return i > 2 }).
+        Buffer(10)
 
-	// Since Map changes types, it wraps the stream
-	doubled := stream.Map(pipeline, func(i int) int { return i * 2 })
+    // Map can change the element type
+    doubled := stream.Map(pipeline, func(i int) int { return i * 2 })
 
-	// Easily collect results
-	results := doubled.Drain()
-	fmt.Println(results) // [6, 8, 10]
+    fmt.Println(doubled.Drain()) // [6 8 10]
 }
 ```
 
+---
+
 ## API Reference
 
-The library is split into three main sub-packages:
+The library is split into three focused sub-packages:
 
-### `github.com/krigsherre/chanx/opt`
-All core channel I/O operations accept optional configurations:
-* `opt.WithContext(ctx)`: Attach cancellation to an operation.
-* `opt.NonBlocking()`: Operation returns immediately if unable to proceed.
-* `opt.WithTimeout(d)`: Define a timeout interval (e.g. for `Batch`).
+### `opt` — Operation Options
 
-### `github.com/krigsherre/chanx/stream`
-The `Stream[T]` type is a drop-in replacement for `<-chan T` that supports method chaining.
-* `Filter(fn func(T) bool)`: Keeps items matching a predicate.
-* `Take(n int)`: Takes only the first `n` items.
-* `Skip(n int)`: Skips the first `n` items.
-* `Buffer(size int)`: Buffers the stream.
-* `Throttle(interval time.Duration)`: Limits emission to one item per `interval`.
-* `Debounce(interval time.Duration, opts ...Option)`: Emits an item only after `interval` silence.
-* `OrDone(done <-chan struct{})`: Aborts the stream when `done` closes.
-* `Drain() []T`: Collects all items into a slice.
-* `ForEach(fn func(T) error, opts ...Option) error`: Synchronously iterates over the stream.
+Configure any channel operation with composable options:
 
-**Creation:**
-* `stream.Of(values ...T) Stream[T]`: Creates a stream from specific values.
-* `stream.FromSlice(s []T) Stream[T]`: Creates a stream from a slice.
-* `stream.Generate(fn func(yield func(T) bool)) Stream[T]`: Yields values via a generator function.
-* `stream.Range(start, end, step int) Stream[int]`: Emits a range of integers.
-* `stream.Repeat(values ...T) Stream[T]`: Emits values in a continuous loop.
+| Option | Description |
+|---|---|
+| `opt.WithContext(ctx)` | Attach context cancellation |
+| `opt.NonBlocking()` | Return immediately if unable to proceed |
+| `opt.WithTimeout(d)` | Set a timeout duration |
 
-**Transformations & Fan Patterns:**
-* `stream.Map(ch <-chan T, fn func(T) U) Stream[U]`: Transforms items one-by-one.
-* `stream.Batch(ch <-chan T, size int, opts ...Option) Stream[[]T]`: Groups items into batches.
-* `stream.FanOut(ch <-chan T, n int) []Stream[T]`: Distributes values round-robin to `n` channels.
-* `stream.Merge(chs ...<-chan T) Stream[T]`: Merges multiple channels into one.
+---
 
-### `github.com/krigsherre/chanx/io`
-* `io.Send(ch chan<- T, val T, opts ...Option) (bool, error)`: Unified send operation.
-* `io.Receive(ch <-chan T, opts ...Option) (T, bool, error)`: Unified receive operation.
-* `io.RecvOr(ch <-chan T, fallback T) T`: Non-blocking receive with a fallback value.
-* `io.NewChan(size int) *Chan[T]`: Creates a new safe channel wrapper that prevents double-close panics.
+### `stream` — Fluent Stream Processing
+
+`Stream[T]` is a typed `<-chan T` with method chaining.
+
+**Creation**
+
+| Function | Description |
+|---|---|
+| `stream.Of(values ...T)` | Create a stream from values |
+| `stream.FromSlice(s []T)` | Create a stream from a slice |
+| `stream.Generate(fn)` | Yield values from a generator |
+| `stream.Range(start, end, step)` | Emit a range of integers |
+| `stream.Repeat(values ...T)` | Emit values in a continuous loop |
+
+**Methods**
+
+| Method | Description |
+|---|---|
+| `.Filter(fn func(T) bool)` | Keep items matching a predicate |
+| `.Take(n int)` | Keep only the first `n` items |
+| `.Skip(n int)` | Skip the first `n` items |
+| `.Buffer(size int)` | Buffer the stream |
+| `.Throttle(d time.Duration)` | Emit at most once per interval |
+| `.Debounce(d time.Duration)` | Emit only after `d` silence |
+| `.OrDone(done <-chan struct{})` | Abort stream when `done` closes |
+| `.Drain() []T` | Collect all items into a slice |
+| `.ForEach(fn func(T) error)` | Iterate synchronously |
+
+**Transformations & Fan Patterns**
+
+| Function | Description |
+|---|---|
+| `stream.Map(ch, fn)` | Transform items one-by-one (can change type) |
+| `stream.Batch(ch, size)` | Group items into `[]T` batches |
+| `stream.FanOut(ch, n)` | Distribute values round-robin to `n` streams |
+| `stream.Merge(chs ...)` | Merge multiple channels into one stream |
+
+---
+
+### `io` — Unified Channel I/O
+
+| Function | Description |
+|---|---|
+| `io.Send(ch, val, opts...)` | Send with optional context / timeout / non-blocking |
+| `io.Receive(ch, opts...)` | Receive with optional context / timeout / non-blocking |
+| `io.RecvOr(ch, fallback)` | Non-blocking receive with a fallback value |
+| `io.NewChan(size)` | Safe channel wrapper — prevents double-close panics |
+
+---
 
 ## License
-MIT
+
+[MIT](LICENSE) © krigsherre
